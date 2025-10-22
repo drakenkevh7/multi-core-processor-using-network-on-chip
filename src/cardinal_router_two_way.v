@@ -5,7 +5,7 @@
 `timescale 1ns/1ps
 `include "design/input_ctrl.v"
 `include "design/output_ctrl.v"
-`include "design/arbitrator_two_way.v"
+`include "design/switch_arbiter_two_way.v"
 
 module cardinal_router_two_way (
 	input  wire        clk,
@@ -162,7 +162,7 @@ module cardinal_router_two_way (
 	);
 
 	// Arbitrator (even/odd).
-	arbitrator_two_way ARB_EVEN (
+	switch_arbiter_two_way ARB_EVEN (
         .clk(clk), .reset(reset), .en(!polarity),
 
 		// Inputs from input_ctrl.
@@ -186,7 +186,7 @@ module cardinal_router_two_way (
 		.pe_out_data  (pe_out_data_even),  .pe_out_enable  (pe_out_en_even)
     );
 
-	arbitrator_two_way ARB_ODD (
+	switch_arbiter_two_way ARB_ODD (
         .clk(clk), .reset(reset), .en(polarity),
 
 		// Inputs from input_ctrl.

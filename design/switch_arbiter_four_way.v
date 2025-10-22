@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////
-//     design: arbitrator_four_way.v
+//     design: switch_arbiter_four_way.v
 //////////////////////////////////////////////////////////////////////
 
 // Arbitrator for one virtual channel (even/odd).
@@ -8,9 +8,9 @@
 // This is a four-way arbitrator that supports UP, DOWN, LEFT, RIGHT, and process elements.
 
 `timescale 1ns/1ps
-`include "design/round_robin_arbiter5.v"
+`include "design/round_robin_arbitrator5.v"
 
-module arbitrator_four_way (
+module switch_arbiter_four_way (
 	input  wire        clk,
 	input  wire        reset, // active-high synchronous reset
 	input  wire        en, // indicates if current arbitrator (odd/even) is active
@@ -210,32 +210,32 @@ module arbitrator_four_way (
 	wire [4:0] gnt_right;
 	wire [4:0] gnt_pe;
 
-	round_robin_arbiter5 RRARB_UP(
+	round_robin_arbitrator5 RRARB_UP(
 		.clk(clk), .reset(reset), .en(en),
 		.output_empty(up_out_empty),
 		.req(req_up),
 		.gnt(gnt_up)
 	);
 
-	round_robin_arbiter5 RRARB_DOWN(
+	round_robin_arbitrator5 RRARB_DOWN(
 		.clk(clk), .reset(reset), .en(en),
 		.output_empty(down_out_empty),
 		.req(req_down),
 		.gnt(gnt_down)
 	);
-	round_robin_arbiter5 RRARB_LEFT(
+	round_robin_arbitrator5 RRARB_LEFT(
 		.clk(clk), .reset(reset), .en(en),
 		.output_empty(left_out_empty),
 		.req(req_left),
 		.gnt(gnt_left)
 	);
-	round_robin_arbiter5 RRARB_RIGHT(
+	round_robin_arbitrator5 RRARB_RIGHT(
 		.clk(clk), .reset(reset), .en(en),
 		.output_empty(right_out_empty),
 		.req(req_right),
 		.gnt(gnt_right)
 	);
-	round_robin_arbiter5 RRARB_PE(
+	round_robin_arbitrator5 RRARB_PE(
 		.clk(clk), .reset(reset), .en(en),
 		.output_empty(pe_out_empty),
 		.req(req_pe),

@@ -5,7 +5,7 @@
 `timescale 1ns/1ps
 `include "design/input_ctrl.v"
 `include "design/output_ctrl.v"
-`include "design/arbitrator_four_way.v"
+`include "design/switch_arbiter_four_way.v"
 
 module cardinal_router_four_way (
 	input  wire        clk,
@@ -247,7 +247,7 @@ module cardinal_router_four_way (
 	);
 
 	// Arbitrator (even/odd).
-	arbitrator_four_way ARB_EVEN (
+	switch_arbiter_four_way ARB_EVEN (
         .clk(clk), .reset(reset), .en(!polarity),
 
 		// Inputs from input_ctrl.
@@ -291,7 +291,7 @@ module cardinal_router_four_way (
 		.pe_out_data     (pe_out_data_even)
     );
 
-	arbitrator_four_way ARB_ODD (
+	switch_arbiter_four_way ARB_ODD (
         .clk(clk), .reset(reset), .en(polarity),
 
 		// Inputs from input_ctrl.

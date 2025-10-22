@@ -1,8 +1,8 @@
 //////////////////////////////////////////////////////////////////////
-//     design: round_robin_arbiter2.v
+//     design: round_robin_arbitrator2.v
 //////////////////////////////////////////////////////////////////////
 
-// 2-input round-robin arbiter.
+// 2-input round-robin arbitrator.
 // Priority favors request0 first then flips when request is granted.
 // It is 2-input because each output (cw/ccw/pe) can be requested by two inputs at most:
 // PE_out:  requests come from CW_in  (deliver)  or CCW_in (deliver)
@@ -12,7 +12,7 @@
 
 `timescale 1ns/1ps
 
-module round_robin_arbiter2 #(
+module round_robin_arbitrator2 #(
 	parameter INIT_PRIORITY = 1'b0
 )(
 	input  wire clk,

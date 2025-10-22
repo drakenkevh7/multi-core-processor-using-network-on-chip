@@ -1,8 +1,8 @@
 //////////////////////////////////////////////////////////////////////
-//     design: round_robin_arbiter5.v
+//     design: round_robin_arbitrator5.v
 //////////////////////////////////////////////////////////////////////
 
-// 5-input round-robin arbiter.
+// 5-input round-robin arbitrator.
 // Priority favors request0 first then flips when request is granted.
 // Currently each output can be requested by four inputs at most:
 // UP_OUT:    requests come from DOWN_in, LEFT_IN, RIGHT_IN, PE_IN;
@@ -13,13 +13,13 @@
 // But for future work, 5-input is reserved at this moment.
 // Arbitration is only done if en && output_empty && both request is present.
 // en & out_free gate arbitration; rotates priority on successful conflicting grant.
-// From previous version, now the round-robin arbiter is 1-hot coded.
+// From previous version, now the round-robin arbitrator is 1-hot coded.
 // For instance, req = 5'b00101 means there is req[0] and req[2],
 // gnt = 5'b 00100 means req[2] has been granted.
 
 `timescale 1ns/1ps
 
-module round_robin_arbiter5 (
+module round_robin_arbitrator5 (
 	input  wire clk,
 	input  wire reset, // active-high synchronous reset
 	input  wire en, // indicates if current arbitrator (odd/even) is active

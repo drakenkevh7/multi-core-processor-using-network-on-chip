@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////
-//     design: arbitrator_two_way.v
+//     design: switch_arbiter_two_way.v
 //////////////////////////////////////////////////////////////////////
 
 // Arbitrator for one virtual channel (even/odd).
@@ -8,9 +8,9 @@
 // This is a two-way arbitrator that supports clockwise, counter-clockwise, and process element.
 
 `timescale 1ns/1ps
-`include "design/round_robin_arbiter2.v"
+`include "design/round_robin_arbitrator2.v"
 
-module arbitrator_two_way (
+module switch_arbiter_two_way (
 	input  wire        clk,
 	input  wire        reset, // active-high synchronous reset
 	input  wire        en, // indicates if current arbitrator (odd/even) is active
@@ -66,10 +66,10 @@ module arbitrator_two_way (
     wire ccw_req_pe    = ccw_in_valid & (ccw_hop == 8'd0) & pe_out_empty;
     wire ccw_req_ccw   = ccw_in_valid & (ccw_hop != 8'd0) & ccw_out_empty;
 
-	// 2-input round-robin arbiter.
+	// 2-input round-robin arbitrator.
 	// PE output: cw_in (deliver) vs ccw_in (deliver) (INIT: cw > ccw).
 	wire win_pe_cw, win_pe_ccw;
-    round_robin_arbiter2 #(PE_INIT) ARBITER_PE (
+    round_robin_arbitrator2 #(PE_INIT) ARBITER_PE (
         .clk(clk), .reset(reset), .en(en), .output_empty(pe_out_empty),
         .req0(cw_req_pe), .req1(ccw_req_pe),
         .win0(win_pe_cw),   .win1(win_pe_ccw)
@@ -77,7 +77,7 @@ module arbitrator_two_way (
 
     // CW output: cw_in (continue) vs pe_in (inject cw) (INIT: cw_in > pe_in).
     wire win_cw_cw, win_cw_pe;
-    round_robin_arbiter2 #(CW_INIT) ARBITER_CW (
+    round_robin_arbitrator2 #(CW_INIT) ARBITER_CW (
         .clk(clk), .reset(reset), .en(en), .output_empty(cw_out_empty),
         .req0(cw_req_cw), .req1(pe_req_cw),	
         .win0(win_cw_cw), .win1(win_cw_pe)
@@ -85,7 +85,7 @@ module arbitrator_two_way (
 
     // CCW output: ccw_in (continue) vs pe_in (inject ccw) (INIT: ccw_in > pe_in).
     wire win_ccw_ccw, win_ccw_pe;
-    round_robin_arbiter2 #(CCW_INIT) ARBITER_CCW (
+    round_robin_arbitrator2 #(CCW_INIT) ARBITER_CCW (
         .clk(clk), .reset(reset), .en(en), .output_empty(ccw_out_empty),
         .req0(ccw_req_ccw), .req1(pe_req_ccw),
         .win0(win_ccw_ccw), .win1(win_ccw_pe)
