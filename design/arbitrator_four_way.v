@@ -56,11 +56,12 @@ module arbitrator_four_way (
 	output reg  [63:0] pe_out_data
 );
 
-	localparam VC_BIT   = 63;
-    localparam DIR_BIT  = 62;
-    localparam HOP_X_HI   = 55; // Hop field for x hop count
+	localparam VC_BIT     = 63;
+    localparam DIR_X_BIT  = 62;
+	localparam DIR_Y_BIT  = 61;
+    localparam HOP_X_HI   = 55; // unsigned hop field for x hop count
 	localparam HOP_X_LO   = 52;
-	localparam HOP_Y_HI   = 51; // Hop field for y hop count
+	localparam HOP_Y_HI   = 51; // unsigned hop field for y hop count
     localparam HOP_Y_LO   = 48;
 
 	// Original input data and valid from input VCs.
@@ -105,9 +106,9 @@ module arbitrator_four_way (
 
 	reg [4:0] target [0:4];
 
-	// Signed x and y offeset, will be extracted from hop field.
-	reg signed [7:0] x_offset, y_offset;
-
+	// Unsigned x and y offeset, will be extracted from hop field.
+	reg [3:0] x_offset, y_offset;
+	reg       x_dir,    y_dir;
 
     // Helper Function to sign-extend 4-bit to 8-bit signed.
 	// Without signed extention, verilog will treat it as unsigned arithmetics.
@@ -128,33 +129,21 @@ module arbitrator_four_way (
 
             // only decode when valid
             if (valid[i]) begin
-                x_offset = signed_ext4(data[i][HOP_X_HI:HOP_X_LO]);
-                y_offset = signed_ext4(data[i][HOP_Y_HI:HOP_Y_LO]);
+				x_dir = data[i][DIR_X_BIT];
+				y_dir = data[i][DIR_Y_BIT];
+                x_offset = data[i][HOP_X_HI:HOP_X_LO];
+                y_offset = data[i][HOP_Y_HI:HOP_Y_LO];
 
-                if      (x_offset < 0) begin
-                    // LEFT: increment X toward 0
-                    x_offset = x_offset + 8'sd1;
-                    data[i][HOP_X_HI:HOP_X_LO] = x_offset[3:0];
-                    target[i] = GOING_LEFT;
-                end 
-				else if (x_offset > 0) begin
-                    // RIGHT: decrement X toward 0
-                    x_offset = x_offset - 8'sd1;
-                    data[i][HOP_X_HI:HOP_X_LO] = x_offset[3:0];
-                    target[i] = GOING_RIGHT;
-                end 
-                else if (y_offset < 0) begin
-                    // UP: increment Y toward 0
-                    y_offset = y_offset + 8'sd1;
-                    data[i][HOP_Y_HI:HOP_Y_LO] = y_offset[3:0];
-                    target[i] = GOING_UP;
-                end 
-				else if (y_offset > 0) begin
-                    // DOWN: decrement Y toward 0
-                    y_offset = y_offset - 8'sd1;
-                    data[i][HOP_Y_HI:HOP_Y_LO] = y_offset[3:0];
-                    target[i] = GOING_DOWN;
-				end
+                if     (x_offset != 0) begin
+                    // Take a step on X axis in indicated direction and decrement X hops.
+                    data[i][HOP_X_HI:HOP_X_LO] = x_offset - 4'd1;
+                    target[i] = (x_dir ? GOING_LEFT : GOING_RIGHT);
+                end
+                else if (y_offset != 0) begin
+                    // Take a step on Y axis in indicated direction and decrement Y hops.
+                    data[i][HOP_Y_HI:HOP_Y_LO] = y_offset - 4'd1;
+                    target[i] = (y_dir ? GOING_UP : GOING_DOWN);
+                end
 
 				else begin
                     // at destination
