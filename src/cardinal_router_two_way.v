@@ -1,13 +1,13 @@
 //////////////////////////////////////////////////////////////////////
-//     design: cardinal_router_bidirectional.v
+//     design: cardinal_router_two_way.v
 //////////////////////////////////////////////////////////////////////
 
 `timescale 1ns/1ps
-`include "input_ctrl.v";
-`include "output_ctrl.v";
-`include "arbitrator";
+`include "design/input_ctrl.v"
+`include "design/output_ctrl.v"
+`include "design/arbitrator_two_way.v"
 
-module cardinal_router_bidirectional (
+module cardinal_router_two_way (
 	input  wire        clk,
 	input  wire        reset, // active-high synchronous reset
 	output reg         polarity, // indicates if current clk cycle is even (0) or odd (1)
@@ -31,29 +31,20 @@ module cardinal_router_bidirectional (
 	input  wire [63:0] pedi, // processing element data input
 
 	// output clockwise
-	input  wire        cwso, // clockwise send output
-	output wire        cwro, // clockwise ready output
-	input  wire [63:0] cwdo, // clockwise data output
+	output wire        cwso, // clockwise send output
+	input  wire        cwro, // clockwise ready output
+	output wire [63:0] cwdo, // clockwise data output
 
 	// output counter-clockwise
-	input  wire        ccwso, // counter-clockwise send output
-	output wire        ccwro, // counter-clockwise ready output
-	input  wire [63:0] ccwdo, // counter-clockwise data output
+	output wire        ccwso, // counter-clockwise send output
+	input  wire        ccwro, // counter-clockwise ready output
+	output wire [63:0] ccwdo, // counter-clockwise data output
 
 	// output processing element
-	input  wire        peso, // processing element send output
-	output wire        pero, // processing element ready output
-	input  wire [63:0] pedo, // processing element data output
+	output wire        peso, // processing element send output
+	input  wire        pero, // processing element ready output
+	output wire [63:0] pedo  // processing element data output
 );
-
-	parameter VC_BIT   = 63,
-    parameter DIR_BIT  = 62,
-    parameter HOP_HI   = 55,
-    parameter HOP_LO   = 48,
-    // Arbiter initial priorities (per selection)
-    parameter PE_INIT  = 1'b0,  // PE output: cw_in over ccw_in initially
-    parameter CW_INIT  = 1'b0,  // CW output: cw_in over pe_in initially
-    parameter CCW_INIT = 1'b0   // CCW output: ccw_in over pe_in initially
 
 	always @(posedge clk) begin
 		if (reset) polarity <= 1'b0;
@@ -171,10 +162,7 @@ module cardinal_router_bidirectional (
 	);
 
 	// Arbitrator (even/odd).
-	artbitrator #(
-        .VC_BIT(VC_BIT), .DIR_BIT(DIR_BIT), .HOP_HI(HOP_HI), .HOP_LO(HOP_LO),
-        .PE_INIT(PE_INIT), .CW_INIT(CW_INIT), .CCW_INIT(CCW_INIT)
-    ) ARB_EVEN (
+	arbitrator_two_way ARB_EVEN (
         .clk(clk), .reset(reset), .en(!polarity),
 
 		// Inputs from input_ctrl.
@@ -198,11 +186,8 @@ module cardinal_router_bidirectional (
 		.pe_out_data  (pe_out_data_even),  .pe_out_enable  (pe_out_en_even)
     );
 
-	artbitrator #(
-        .VC_BIT(VC_BIT), .DIR_BIT(DIR_BIT), .HOP_HI(HOP_HI), .HOP_LO(HOP_LO),
-        .PE_INIT(PE_INIT), .CW_INIT(CW_INIT), .CCW_INIT(CCW_INIT)
-    ) ARB_ODD (
-        .clk(clk), .reset(reset), .en(!polarity),
+	arbitrator_two_way ARB_ODD (
+        .clk(clk), .reset(reset), .en(polarity),
 
 		// Inputs from input_ctrl.
         .cw_in_data  (cw_in_data_odd),  .cw_in_valid (cw_in_valid_odd),
@@ -224,7 +209,4 @@ module cardinal_router_bidirectional (
 		.ccw_out_data (ccw_out_data_odd), .ccw_out_enable (ccw_out_en_odd),
 		.pe_out_data  (pe_out_data_odd),  .pe_out_enable  (pe_out_en_odd)
     );
-
-
-
 endmodule

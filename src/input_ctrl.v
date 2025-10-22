@@ -34,8 +34,14 @@ module input_ctrl (
 
 	// Output data for arbitrator.
 	output reg  [63:0] data_even,
-	output reg  [63:0] data_odd,
+	output reg  [63:0] data_odd
 );
+
+    wire ext_even =  polarity;  // when 1, external is even
+    wire ext_odd  = ~polarity;  // when 0, external is odd
+    wire can_accept_even = ext_even && !valid_even;
+    wire can_accept_odd  = ext_odd  && !valid_odd;
+
 
 	always @(posedge clk) begin
 		if (reset) begin
@@ -48,28 +54,24 @@ module input_ctrl (
 		else begin
 			// If polarity == 1, internal is odd, external is even.
 			// If even is not occupied, it is ready for new package.
-			if (polarity) ready_in <= ~valid_even;
 			// If polarity == 0, internal is even, external is odd.
 			// If odd is not occupied, it is ready for new package.
-			else          ready_in <= ~valid_odd;
+			ready_in <= ext_even ? ~valid_even : ~valid_odd;
 
 			// Latch input if valid and channel empty.
-			if (send_in && ready_in) begin
-				if (polarity) begin // internal is odd, external is even
-					data_odd  <= data_in;
-					valid_odd <= 1'b1;
-				end
-				else begin // internal is even, external is odd
-					data_even  <= data_in;
-					valid_even <= 1'b1;
-				end
-			end
+            if (send_in && can_accept_even) begin
+                data_even  <= data_in;
+                valid_even <= 1'b1;
+            end
+            if (send_in && can_accept_odd) begin
+                data_odd   <= data_in;
+                valid_odd  <= 1'b1;
+            end
 
 			// If even/odd is consumed in the last cycle: clear == 1'b1,
 			// even/odd should no longer be valid
 			if (clear_even) valid_even <= 1'b0;
 			if (clear_odd)  valid_odd  <= 1'b0;			
-
 		end
 	end
 

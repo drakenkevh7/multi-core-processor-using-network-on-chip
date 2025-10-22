@@ -1,24 +1,16 @@
 //////////////////////////////////////////////////////////////////////
-//     design: arbitrator.v
+//     design: arbitrator_two_way.v
 //////////////////////////////////////////////////////////////////////
 
 // Arbitrator for one virtual channel (even/odd).
 // Decodes routing, arbitrates per-output, writes output buffers, and clears input buffer.
 // Purely combinational, so no need to reset outputs.
+// This is a two-way arbitrator that supports clockwise, counter-clockwise, and process element.
 
 `timescale 1ns/1ps
-`include "round_robin_arbiter.v"
+`include "design/round_robin_arbiter2.v"
 
-module arbitrator #(
-    parameter VC_BIT   = 63,
-    parameter DIR_BIT  = 62,
-    parameter HOP_HI   = 55,
-    parameter HOP_LO   = 48,
-    // Arbiter initial priorities (per selection)
-    parameter PE_INIT  = 1'b0,  // PE output: cw_in over ccw_in initially
-    parameter CW_INIT  = 1'b0,  // CW output: cw_in over pe_in initially
-    parameter CCW_INIT = 1'b0   // CCW output: ccw_in over pe_in initially
-)(
+module arbitrator_two_way (
 	input  wire        clk,
 	input  wire        reset, // active-high synchronous reset
 	input  wire        en, // indicates if current arbitrator (odd/even) is active
@@ -50,6 +42,15 @@ module arbitrator #(
 	output reg         pe_out_enable
 );
 
+	localparam VC_BIT   = 63;
+    localparam DIR_BIT  = 62;
+    localparam HOP_HI   = 55;
+    localparam HOP_LO   = 48;
+    // Arbiter initial priorities (per selection)
+    localparam PE_INIT  = 1'b0;  // PE output: cw_in over ccw_in initially
+    localparam CW_INIT  = 1'b0;  // CW output: cw_in over pe_in initially
+    localparam CCW_INIT = 1'b0;   // CCW output: ccw_in over pe_in initially
+
 	// Preprocess to generate request
     // PE input uses DIR_BIT to choose CW/CCW (only on injection).
     wire pe_req_cw  = pe_in_valid  & (pe_in_data[DIR_BIT] == 1'b0) & cw_out_empty;
@@ -68,24 +69,24 @@ module arbitrator #(
 	// 2-input round-robin arbiter.
 	// PE output: cw_in (deliver) vs ccw_in (deliver) (INIT: cw > ccw).
 	wire win_pe_cw, win_pe_ccw;
-    round_robin_arbiter #(PE_INIT) ARBITER_PE (
-        .clk(clk), .reset(reset), .en(en), .out_free(pe_out_empty),
+    round_robin_arbiter2 #(PE_INIT) ARBITER_PE (
+        .clk(clk), .reset(reset), .en(en), .output_empty(pe_out_empty),
         .req0(cw_req_pe), .req1(ccw_req_pe),
         .win0(win_pe_cw),   .win1(win_pe_ccw)
     );
 
     // CW output: cw_in (continue) vs pe_in (inject cw) (INIT: cw_in > pe_in).
     wire win_cw_cw, win_cw_pe;
-    round_robin_arbiter #(CW_INIT) ARBITER_CW (
-        .clk(clk), .reset(reset), .en(en), .out_free(cw_out_empty),
+    round_robin_arbiter2 #(CW_INIT) ARBITER_CW (
+        .clk(clk), .reset(reset), .en(en), .output_empty(cw_out_empty),
         .req0(cw_req_cw), .req1(pe_req_cw),	
         .win0(win_cw_cw), .win1(win_cw_pe)
     );
 
     // CCW output: ccw_in (continue) vs pe_in (inject ccw) (INIT: ccw_in > pe_in).
     wire win_ccw_ccw, win_ccw_pe;
-    round_robin_arbiter #(CCW_INIT) ARBITER_CCW (
-        .clk(clk), .reset(reset), .en(en), .out_free(ccw_out_empty),
+    round_robin_arbiter2 #(CCW_INIT) ARBITER_CCW (
+        .clk(clk), .reset(reset), .en(en), .output_empty(ccw_out_empty),
         .req0(ccw_req_ccw), .req1(pe_req_ccw),
         .win0(win_ccw_ccw), .win1(win_ccw_pe)
     );

@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////
-//     design: round_robin_arbiter.v
+//     design: round_robin_arbiter2.v
 //////////////////////////////////////////////////////////////////////
 
 // 2-input round-robin arbiter.
@@ -12,7 +12,7 @@
 
 `timescale 1ns/1ps
 
-module round_robin_arbiter #(
+module round_robin_arbiter2 #(
 	parameter INIT_PRIORITY = 1'b0
 )(
 	input  wire clk,

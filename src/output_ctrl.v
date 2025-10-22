@@ -64,9 +64,11 @@ module output_ctrl (
 				end
 			end
 
-			if (!polarity && output_buffer_data_odd  && ready_out) output_buffer_valid_odd  <= 1'b0;
-            if (polarity  && output_buffer_data_even && ready_out) output_buffer_valid_even <= 1'b0;
+			if (!polarity && output_buffer_valid_odd  && ready_out) output_buffer_valid_odd  <= 1'b0;
+            if (polarity  && output_buffer_valid_even && ready_out) output_buffer_valid_even <= 1'b0;
 		end
 	end
+
+
 
 endmodule
