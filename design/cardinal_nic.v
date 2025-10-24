@@ -14,11 +14,11 @@ module cardinal_nic (
     output reg  [63:0] d_out,      // data output to processor (read)
     input  wire        nicEn,      // NIC enable (chip-select)
     input  wire        nicEnWr,    // NIC write enable (1 for write, 0 for read)
-    input  wire        net_si,     // Send handshake input from router (input channel)
-    output reg         net_ri,     // Ready handshake output to router (input channel)
-
+	
     // Router side.
-    input  wire [63:0] net_di,     // Data from router to NIC (input channel)
+	input  wire        net_si,     // Send handshake input from router (input channel)
+    output reg         net_ri,     // Ready handshake output to router (input channel)
+	input  wire [63:0] net_di,     // Data from router to NIC (input channel)
     output reg         net_so,     // Send handshake output to router (output channel)
     input  wire        net_ro,     // Ready handshake input from router (output channel)
     output wire [63:0] net_do,     // Data from NIC to router (output channel)
