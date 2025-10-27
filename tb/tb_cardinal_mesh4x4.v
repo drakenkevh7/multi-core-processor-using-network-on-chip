@@ -224,7 +224,7 @@ module tb_cardinal_mesh4x4;
 
         // Open files
         fh_time = $fopen("start_end_time.out","w");
-        fh_log  = $fopen("gather_all.txt","w");
+        fh_log  = $fopen("tb_cardinal_mesh4x4_gather.txt","w");
         $fdisplay(fh_time, "Gather testbench start");
 
         // Reset
