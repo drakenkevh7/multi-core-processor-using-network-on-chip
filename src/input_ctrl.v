@@ -44,7 +44,7 @@ module input_ctrl (
 
     // This drives me crazy...
     // After several hours of debugging, this seems to be the culprit...
-    // I hate this =(
+    // ready_in should be driven directly by the current valid_* state, instead of being registered with a non-blocking statement.
     always @(*) begin
         ready_in <= ext_even ? ~valid_even : ~valid_odd;
     end

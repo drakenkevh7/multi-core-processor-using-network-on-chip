@@ -1,0 +1,28 @@
+After reset: net_ri=1, net_so=0, net_polarity=0
+
+=== Handshake A (per figure): net_ro=1; inject on EVEN then on ODD ===
+Waiting for EVEN polarity before first send...
+EVEN send: net_so=1  net_do=eeeeeeeeeeeeee00  net_polarity=1
+Waiting for ODD polarity before second send...
+ODD  send: net_so=1  net_do=dddddddddddddd11  net_polarity=0
+
+=== Handshake B (blocked then released): net_ro=0 -> 1 ===
+While blocked: net_so=0 (expect 0)
+Released: router ready. NIC will send on next eligible polarity.
+UNBLOCK send: net_so=1  net_do=b10cb10cb10cb10c  net_polarity=1
+
+=== Processor STORE: OUT buffer AVAILABLE ===
+OUT status before = 0000000000000000
+OUT status after  = 0000000000000001 (expect full/LSB=1)
+
+=== Processor STORE: OUT buffer UNAVAILABLE ===
+OUT status remains = 0000000000000001 (should still be full)
+
+=== Processor LOAD: IN buffer AVAILABLE ===
+Processor load data = abcdef00fedcba00 (should be injected word)
+IN status now = 0000000000000000 (expect empty/0)
+
+=== Processor LOAD: IN buffer UNAVAILABLE ===
+Processor load from empty returned 0000000000000000; IN status 0000000000000000 (should stay empty/0)
+
+All tests completed. Ending simulation.
