@@ -14,11 +14,11 @@ module cardinal_nic (
     output reg  [63:0] d_out,      // data output to processor (read)
     input  wire        nicEn,      // NIC enable (chip-select)
     input  wire        nicEnWr,    // NIC write enable (1 for write, 0 for read)
-	
+
     // Router side.
-	input  wire        net_si,     // Send handshake input from router (input channel)
+    input  wire        net_si,     // Send handshake input from router (input channel)
     output reg         net_ri,     // Ready handshake output to router (input channel)
-	input  wire [63:0] net_di,     // Data from router to NIC (input channel)
+    input  wire [63:0] net_di,     // Data from router to NIC (input channel)
     output reg         net_so,     // Send handshake output to router (output channel)
     input  wire        net_ro,     // Ready handshake input from router (output channel)
     output wire [63:0] net_do,     // Data from NIC to router (output channel)
@@ -100,8 +100,8 @@ module cardinal_nic (
                     end
                     ADDR_IN_STATUS: begin
                         // Read input status register (1-bit)
-                        // Place status bit in MSB of d_out, others = 0
-                        d_out <= { input_status, 63'b0 };
+                        // Place status bit in LSB of d_out, others = 0
+                        d_out <= {63'b0, input_status};
                         // (Reading status does not modify it)
                     end
                     ADDR_OUT_BUF: begin
@@ -111,7 +111,7 @@ module cardinal_nic (
                     end
                     ADDR_OUT_STATUS: begin
                         // Read output status register (1-bit)
-                        d_out <= { output_status, 63'b0 };  // status bit in d_out[63], rest 0
+                        d_out <= {63'b0, output_status};  // status bit in d_out[0], rest 0
                         // (No state change on reading status)
                     end
                 endcase

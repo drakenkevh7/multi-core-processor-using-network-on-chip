@@ -112,12 +112,12 @@ module switch_arbiter_four_way (
 
     // Helper Function to sign-extend 4-bit to 8-bit signed.
 	// Without signed extention, verilog will treat it as unsigned arithmetics.
-    function [7:0] signed_ext4;
-        input [3:0] val;
-        begin
-			signed_ext4 = { { 4{val[3]} }, val};
-			end
-    endfunction
+    // function [7:0] signed_ext4;
+    //     input [3:0] val;
+    //     begin
+	// 		signed_ext4 = { { 4{val[3]} }, val};
+	// 		end
+    // endfunction
 
 	// Building target vector, showing which output buffer is going, with modified hop field.
     always @(*) begin
@@ -168,28 +168,28 @@ module switch_arbiter_four_way (
 		((target[3] == GOING_UP)   & valid[3]),
 		((target[2] == GOING_UP)   & valid[2]),
 		((target[1] == GOING_UP)   & valid[1]),
-		((target[0] == GOING_UP)   & valid[0])
+		1'b0
 	};
 
 	assign req_down = {
 		((target[4] == GOING_DOWN) & valid[4]),
 		((target[3] == GOING_DOWN) & valid[3]),
 		((target[2] == GOING_DOWN) & valid[2]),
-		((target[1] == GOING_DOWN) & valid[1]),
+		1'b0,
 		((target[0] == GOING_DOWN) & valid[0])
 	};
 
 	assign req_left = {
 		((target[4] == GOING_LEFT) & valid[4]),
 		((target[3] == GOING_LEFT) & valid[3]),
-		((target[2] == GOING_LEFT) & valid[2]),
+		1'b0,
 		((target[1] == GOING_LEFT) & valid[1]),
 		((target[0] == GOING_LEFT) & valid[0])
 	};
 
 	assign req_right = {
 		((target[4] == GOING_RIGHT) & valid[4]),
-		((target[3] == GOING_RIGHT) & valid[3]),
+		1'b0,
 		((target[2] == GOING_RIGHT) & valid[2]),
 		((target[1] == GOING_RIGHT) & valid[1]),
 		((target[0] == GOING_RIGHT) & valid[0])

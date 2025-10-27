@@ -4,210 +4,214 @@
 
 `timescale 1ns/1ps
 module tb_cardinal_nic;
-    // Testbench signals
+
+    // ---------------- DUT I/O ----------------
     reg         clk;
     reg         reset;
+
     reg  [1:0]  addr;
     reg  [63:0] d_in;
     wire [63:0] d_out;
     reg         nicEn;
     reg         nicEnWr;
+
     reg         net_si;
     wire        net_ri;
     reg  [63:0] net_di;
     wire        net_so;
     reg         net_ro;
     wire [63:0] net_do;
+
     reg         net_polarity;
 
-    // Instantiate the NIC module (Device Under Test)
+    // Device Under Test
     cardinal_nic dut (
-        .clk        (clk),
-        .reset      (reset),
-        .addr       (addr),
-        .d_in       (d_in),
-        .d_out      (d_out),
-        .nicEn      (nicEn),
-        .nicEnWr    (nicEnWr),
-        .net_si     (net_si),
-        .net_ri     (net_ri),
-        .net_di     (net_di),
-        .net_so     (net_so),
-        .net_ro     (net_ro),
-        .net_do     (net_do),
-        .net_polarity (net_polarity)
+        .clk         (clk),
+        .reset       (reset),
+        .addr        (addr),
+        .d_in        (d_in),
+        .d_out       (d_out),
+        .nicEn       (nicEn),
+        .nicEnWr     (nicEnWr),
+        .net_si      (net_si),
+        .net_ri      (net_ri),
+        .net_di      (net_di),
+        .net_so      (net_so),
+        .net_ro      (net_ro),
+        .net_do      (net_do),
+        .net_polarity(net_polarity)
     );
 
-    // Clock generation: 10 time units period
-    initial begin
-        clk = 0;
-        forever #5 clk = ~clk;
+    // ---------------- Clock / net_polarity ----------------
+    initial begin clk = 1'b0; forever #5 clk = ~clk; end
+
+    // 1) Required: net_polarity toggles on posedge, resets to 0
+    always @(posedge clk) begin
+        if (reset) net_polarity <= 1'b0;
+        else       net_polarity <= ~net_polarity;
     end
 
-    // Test sequence
+    // ---------------- Logging ----------------
+    integer fh;
+    `define P0(MSG)                     begin $display(MSG);                           $fdisplay(fh, MSG); end
+    `define P1(MSG,A)                   begin $display(MSG, A);                        $fdisplay(fh, MSG, A); end
+    `define P2(MSG,A,B)                 begin $display(MSG, A, B);                     $fdisplay(fh, MSG, A, B); end
+    `define P3(MSG,A,B,C)               begin $display(MSG, A, B, C);                  $fdisplay(fh, MSG, A, B, C); end
+    `define P4(MSG,A,B,C,D)             begin $display(MSG, A, B, C, D);               $fdisplay(fh, MSG, A, B, C, D); end
+
+    // ---------------- Helpers (Verilog-2001) ----------------
+    task wait_cycles; input integer n; integer k; begin for (k=0;k<n;k=k+1) @(posedge clk); end endtask
+
+    // Processor store to OUT buffer
+    task processor_store_outbuf; input [63:0] payload;
+    begin
+        d_in   = payload;
+        nicEn  = 1'b1; nicEnWr = 1'b1; addr = 2'b10;
+        @(posedge clk);
+        nicEn  = 1'b0; nicEnWr = 1'b0;
+    end
+    endtask
+
+    // Processor load from IN buffer
+    task processor_load_inbuf; output [63:0] val;
+    begin
+        nicEn = 1'b1; nicEnWr = 1'b0; addr = 2'b00;
+        @(posedge clk); val = d_out; nicEn = 1'b0;
+    end
+    endtask
+
+    // Processor read IN status
+    task processor_read_in_status; output [63:0] val;
+    begin
+        nicEn = 1'b1; nicEnWr = 1'b0; addr = 2'b01;
+        @(posedge clk); val = d_out; nicEn = 1'b0;
+    end
+    endtask
+
+    // Processor read OUT status
+    task processor_read_out_status; output [63:0] val;
+    begin
+        nicEn = 1'b1; nicEnWr = 1'b0; addr = 2'b11;
+        @(posedge clk); val = d_out; nicEn = 1'b0;
+    end
+    endtask
+
+    // Router sends one flit (1-cycle)
+    task router_send_one; input [63:0] flit;
+    begin
+        net_di = flit;
+        net_si = 1'b1;
+        @(posedge clk);
+        net_si = 1'b0;
+    end
+    endtask
+
+    // Wait until a particular polarity is present (0=even,1=odd)
+    task wait_for_polarity; input bitval;
+    begin
+        while (net_polarity != bitval) @(posedge clk);
+    end
+    endtask
+
+    // Wait until NIC performs a send (net_so high for one cycle)
+    task wait_for_send;
+    begin
+        while (net_so == 1'b0) @(posedge clk);
+    end
+    endtask
+
+    // ---------------- Test Stimulus ----------------
+    reg [63:0] vstat, vrd;
+
     initial begin
-        // Initialize all signals
-        reset = 1;
-        nicEn = 0;
-        nicEnWr = 0;
-        addr = 2'b00;
-        d_in = 64'h0;
-        net_si = 0;
-        net_ro = 0;
-        net_polarity = 0;
-        net_di = 64'h0;
+        fh = $fopen("tb_cardinal_nic.txt","w");
+        if (fh==0) begin $display("ERROR: cannot open tb_cardinal_nic.txt"); $finish; end
 
-        // Release reset after a few cycles
-        #15 reset = 0;
-        @(posedge clk);  // wait for first clock edge after reset
+        // init
+        reset = 1'b1;
+        nicEn = 1'b0; nicEnWr=1'b0; addr=2'b00; d_in=64'h0;
+        net_si=1'b0; net_ro=1'b0; net_di=64'h0;
+        wait_cycles(3);
+        reset = 1'b0;
+        @(posedge clk);
 
-        // After reset, verify initial handshake outputs and status
-        $display("After reset: net_ri=%b (expect 1, buffer empty), net_so=%b (expect 0, no send), d_out=%h", 
-                 net_ri, net_so, d_out);
+        `P3("After reset: net_ri=%b, net_so=%b, net_polarity=%b", net_ri, net_so, net_polarity)
 
-        // ** Test Output Channel (Processor to Router) **
-        $display("\n--- Testing processor send to network (output channel) ---");
-        // 1. Processor reads the output status register (addr=11) to check if buffer is free
-        nicEn = 1; nicEnWr = 0; addr = 2'b11;  // read output status
-        @(posedge clk);  // data will be available after this clock
-        $display("Output status register read = %h (expected 0x0000...0000 since buffer empty)", d_out);
-        nicEn = 0;
+        // ========================================================
+        // (2) Handshakes exactly like the figure 3
+        // ========================================================
 
-        // 2. Processor writes a packet to the output buffer (addr=10) if status was 0 (free)
-        d_in = 64'hA5A5A5A5A5A5A5A5;
-        $display("CPU writing packet %h to output buffer...", d_in);
-        nicEn = 1; nicEnWr = 1; addr = 2'b10;  // write output buffer
-        @(posedge clk);  // perform the write at this clock edge
-        nicEn = 0; nicEnWr = 0;
-        // After this write, NIC's output_status should be 1 (buffer full)
-        nicEn = 1; nicEnWr = 0; addr = 2'b11;  // read output status again
-        @(posedge clk);
-        $display("Output status after write = %h (MSB should be 1 indicating full)", d_out);
-        nicEn = 0;
+        // --- A) Per-figure demo: router ready; send once on EVEN then once on ODD ---
+        `P0("\n=== Handshake A (per figure): net_ro=1; inject on EVEN then on ODD ===")
+        net_ro = 1'b1;
 
-        // 3. Attempt an illegal read from the output buffer (which is write-only)
-        $display("CPU attempts to read from output buffer (illegal)...");
-        nicEn = 1; nicEnWr = 0; addr = 2'b10;  // read output buffer (invalid operation)
+        // 1) Fill OUT buffer (\"Even\" packet). Wait for EVEN polarity → NIC should send on that window.
+        processor_store_outbuf(64'hEEEE_EEEE_EEEE_EE00); // tag = EVEN
+        `P0("Waiting for EVEN polarity before first send...")
+        wait_for_polarity(1'b0); // even
+        wait_for_send;
+        `P3("EVEN send: net_so=%b  net_do=%h  net_polarity=%b", net_so, net_do, net_polarity)
         @(posedge clk);
-        $display("Read from output buffer returned d_out = %h (NIC should ignore, e.g. return 0)", d_out);
-        nicEn = 0;
-        // Check that the output buffer still holds the packet (output_status still 1)
-        nicEn = 1; nicEnWr = 0; addr = 2'b11;  // read output status
-        @(posedge clk);
-        $display("Output status after illegal read = %h (should remain full with MSB=1)", d_out);
-        nicEn = 0;
 
-        // 4. Router handshake: net_ro initially low (router not ready)
-        $display("Router not ready (net_ro=0) -> NIC should hold packet (net_so stays 0)");
-        net_ro = 0;
-        net_polarity = 0;  // router polarity (doesn't matter since not ready)
+        // 2) Fill OUT buffer again (\"Odd\" packet). Wait for ODD polarity → NIC should send.
+        processor_store_outbuf(64'hDDDD_DDDD_DDDD_DD11); // tag = ODD
+        `P0("Waiting for ODD polarity before second send...")
+        wait_for_polarity(1'b1); // odd
+        wait_for_send;
+        `P3("ODD  send: net_so=%b  net_do=%h  net_polarity=%b", net_so, net_do, net_polarity)
         @(posedge clk);
-        $display("net_so = %b (expected 0, router not ready)", net_so);
 
-        // 5. Router becomes ready (net_ro=1) but with wrong polarity (not matching packet's VC bit)
-        net_ro = 1;
-        // Determine opposite polarity: if our packet's VC bit (LSB of A5...A5) is, say, 1 or 0
-        net_polarity = ~d_in[0];  // set polarity opposite to packet's VC bit
+        // --- B) Blocking demo: router not ready, then ready ---
+        `P0("\n=== Handshake B (blocked then released): net_ro=0 -> 1 ===")
+        processor_store_outbuf(64'hB10C_B10C_B10C_B10C);
+        net_ro = 1'b0;  // block router
+        wait_cycles(4);
+        `P1("While blocked: net_so=%b (expect 0)", net_so)
+        net_ro = 1'b1;  // release
+        `P0("Released: router ready. NIC will send on next eligible polarity.")
+        wait_for_send;
+        `P3("UNBLOCK send: net_so=%b  net_do=%h  net_polarity=%b", net_so, net_do, net_polarity)
         @(posedge clk);
-        $display("Router ready but polarity=%b (packet VC=%b) -> NIC should not send yet", net_polarity, d_in[0]);
-        $display("net_so = %b (expected 0, waiting for correct polarity)", net_so);
 
-        // 6. Now set router polarity to match the packet's VC bit, with router still ready
-        net_polarity = d_in[0];  // match polarity to packet VC
-        @(posedge clk);  // NIC should send this cycle
-        $display("Router ready and polarity=%b matches packet VC -> NIC should assert net_so", net_polarity);
-        $display("net_so = %b, net_do = %h (packet sent on net_do)", net_so, net_do);
-        @(posedge clk);  // next cycle after send
-        // After sending, NIC should have cleared the output buffer (output_status = 0)
-        nicEn = 1; nicEnWr = 0; addr = 2'b11;
-        @(posedge clk);
-        $display("Output status after send = %h (expected 0x0000...0000, buffer now free)", d_out);
-        nicEn = 0;
+        // ========================================================
+        // (3) Processor <-> NIC matrix (store/load × available/unavailable)
+        // ========================================================
+        net_ro = 1'b0;
+        // --- Store when OUT available ---
+        `P0("\n=== Processor STORE: OUT buffer AVAILABLE ===")
+        processor_read_out_status(vstat);  `P1("OUT status before = %h", vstat)
+        processor_store_outbuf(64'h0BAD_F00D_0BAD_F00D);
+        processor_read_out_status(vstat);  `P1("OUT status after  = %h (expect full/LSB=1)", vstat)
 
-        // 7. Test sending a second packet back-to-back
-        d_in = 64'hDEADBEEFDEADBEEF;
-        $display("\nSending a second packet %h after first is delivered...", d_in);
-        nicEn = 1; nicEnWr = 1; addr = 2'b10;
-        @(posedge clk);
-        nicEn = 0; nicEnWr = 0;
-        // Router is ready with correct polarity immediately
-        net_ro = 1;
-        net_polarity = d_in[0];  // assume polarity matches directly
-        @(posedge clk);
-        $display("net_so = %b, net_do = %h (second packet send)", net_so, net_do);
-        @(posedge clk);
-        // Confirm NIC output buffer freed again
-        nicEn = 1; nicEnWr = 0; addr = 2'b11;
-        @(posedge clk);
-        $display("Output status after second send = %h (should be 0/empty)", d_out);
-        nicEn = 0;
+        // --- Store when OUT unavailable (still full) ---
+        `P0("\n=== Processor STORE: OUT buffer UNAVAILABLE ===")
+        processor_store_outbuf(64'hFACE_FACE_FACE_FACE); // attempt overwrite
+        processor_read_out_status(vstat);  `P1("OUT status remains = %h (should still be full)", vstat)
+        // Let router take it so we can proceed
+        net_ro = 1'b1; wait_for_send; @(posedge clk);
 
-        // ** Test Input Channel (Router to Processor) **
-        $display("\n--- Testing router send to processor (input channel) ---");
-        // Ensure NIC input buffer is empty (net_ri should be 1)
-        $display("Before receiving: net_ri = %b (expect 1, empty input buffer)", net_ri);
-        // 1. Simulate router sending a packet when net_ri=1
-        net_di = 64'hCAFEBABECAFEBABE;
-        $display("Router injecting packet %h to NIC...", net_di);
-        net_si = 1;  // router asserts send
-        // (net_ri is 1, so NIC should accept this packet on next clock)
-        @(posedge clk);
-        net_si = 0;  // deassert send after one cycle
-        // Now NIC should have latched the packet and marked input_status=1, net_ri=0
-        $display("After router send: net_ri = %b (expected 0, input buffer full)", net_ri);
+        // --- Load when IN available ---
+        `P0("\n=== Processor LOAD: IN buffer AVAILABLE ===")
+        router_send_one(64'hABCD_EF00_FEDC_BA00); @(posedge clk);
+        processor_load_inbuf(vrd);         `P1("Processor load data = %h (should be injected word)", vrd)
+        processor_read_in_status(vstat);   `P1("IN status now = %h (expect empty/0)", vstat)
 
-        // 2. Processor reads the input status register to check if a packet arrived
-        nicEn = 1; nicEnWr = 0; addr = 2'b01;
-        @(posedge clk);
-        $display("Input status register read = %h (MSB reflects input_status, expect 1)", d_out);
-        nicEn = 0;
-        // 3. Processor reads the input buffer to retrieve the packet
-        nicEn = 1; nicEnWr = 0; addr = 2'b00;
-        @(posedge clk);
-        $display("CPU read input buffer, got %h (expected %h)", d_out, 64'hCAFEBABECAFEBABE);
-        nicEn = 0;
-        // After read, NIC should clear input buffer and set net_ri=1 again (ready for next packet)
-        $display("After CPU read: net_ri = %b (expect 1, buffer free again)", net_ri);
+        // --- Load when IN unavailable (empty) ---
+        `P0("\n=== Processor LOAD: IN buffer UNAVAILABLE ===")
+        processor_load_inbuf(vrd);         `P2("Processor load from empty returned %h; IN status %h (should stay empty/0)", vrd, vstat)
 
-        // 4. Test reading input buffer when it's empty (should not alter state)
-        $display("CPU reads empty input buffer (undefined data)...");
-        nicEn = 1; nicEnWr = 0; addr = 2'b00;
-        @(posedge clk);
-        $display("Read empty input buffer returned %h (could be last value or 0)", d_out);
-        nicEn = 0;
-        $display("Input status still %b, net_ri = %b (should remain 0 and 1 respectively)", 
-                 dut.input_status, net_ri);
-
-        // ** Test Illegal Operations on Input/Status Registers **
-        // 5. Attempt to write to the input buffer (illegal, should be ignored)
-        $display("\nTesting illegal writes to read-only registers...");
-        d_in = 64'h1234567890ABCDEF;
-        $display("CPU attempts to write %h to input buffer (addr=00, read-only)", d_in);
-        nicEn = 1; nicEnWr = 1; addr = 2'b00;
-        @(posedge clk);
-        nicEn = 0; nicEnWr = 0;
-        // NIC should ignore this: input_status remains unchanged (still 0), net_ri stays 1
-        $display("After illegal write: input_status=%b (expect 0 unchanged), net_ri=%b (expect 1)", 
-                 dut.input_status, net_ri);
-
-        // 6. Attempt to write to the status registers (also illegal)
-        d_in = 64'hFFFFFFFFFFFFFFFF;
-        $display("CPU attempts to write to input status register (addr=01, read-only)");
-        nicEn = 1; nicEnWr = 1; addr = 2'b01;
-        @(posedge clk);
-        nicEn = 0;
-        $display("Input status after illegal write = %b (should remain %b)", 
-                 dut.input_status, dut.input_status);
-
-        $display("CPU attempts to write to output status register (addr=11, read-only)");
-        nicEn = 1; nicEnWr = 1; addr = 2'b11;
-        @(posedge clk);
-        nicEn = 0;
-        $display("Output status after illegal write = %b (should remain %b)", 
-                 dut.output_status, dut.output_status);
-
-        // End of tests
-        $display("\nAll tests completed.");
+        // ========================================================
+        `P0("\nAll tests completed. Ending simulation.")
+        $fclose(fh);
         $finish;
     end
+
+    // Timeout
+    initial begin
+        #100000;
+        $display("TIMEOUT"); $fclose(fh); $finish;
+    end
+
 endmodule
+
+    

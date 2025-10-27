@@ -6,27 +6,24 @@
 
 module tb_cardinal_router_four_way;
 
-    // Clock / reset
+    // ---------------- Clock / Reset ----------------
     reg clk, reset;
+    integer cyc;
 
-    // INPUTS to DUT (from neighbors / PE)
-    reg        upsi;    wire upri;    reg  [63:0] updi;
-    reg        downsi;  wire downri;  reg  [63:0] downdi;
-    reg        leftsi;  wire leftri;  reg  [63:0] leftdi;
-    reg        rightsi; wire rightri; reg  [63:0] rightdi;
-    reg        pesi;    wire peri;    reg  [63:0] pedi;
+    initial begin clk=0; forever #5 clk=~clk; end
+    always @(posedge clk) cyc <= reset ? 0 : (cyc+1);
 
-    // OUTPUTS from DUT (to neighbors / PE)
-    wire       upso;    reg  upro;    wire [63:0] updo;
-    wire       downso;  reg  downro;  wire [63:0] downdo;
-    wire       leftso;  reg  leftro;  wire [63:0] leftdo;
-    wire       rightso; reg  rightro; wire [63:0] rightdo;
-    wire       peso;    reg  pero;    wire [63:0] pedo;
-
-    // Router polarity
+    // ---------------- DUT I/O ----------------
     wire polarity;
 
-    // DUT
+    reg        upsi, downsi, leftsi, rightsi, pesi;
+    wire       upri, downri, leftri, rightri, peri;
+    reg [63:0] updi, downdi, leftdi, rightdi, pedi;
+
+    wire       upso, downso, leftso, rightso, peso;
+    reg        upro, downro, leftro, rightro, pero;
+    wire [63:0] updo, downdo, leftdo, rightdo, pedo;
+
     cardinal_router_four_way DUT (
         .clk(clk), .reset(reset), .polarity(polarity),
         .upsi(upsi), .upri(upri), .updi(updi),
@@ -41,104 +38,151 @@ module tb_cardinal_router_four_way;
         .peso(peso), .pero(pero), .pedo(pedo)
     );
 
-    // 100 MHz clock
-    initial begin clk = 1'b0; forever #5 clk = ~clk; end
+    // ---------------- Field map (matches your RTL) ----------------
+    localparam VC_BIT    = 63;
+    localparam DIR_X_BIT = 62; // 1 = LEFT, 0 = RIGHT
+    localparam DIR_Y_BIT = 61; // 1 = UP,   0 = DOWN
+    localparam HOP_X_HI  = 55;
+    localparam HOP_X_LO  = 52;
+    localparam HOP_Y_HI  = 51;
+    localparam HOP_Y_LO  = 48;
 
-    // Cycle counter
-    integer cyc;
-    always @(posedge clk) cyc <= cyc + 1;
-
-    // Print helper: sign-extend nibble to integer
-    function integer sx4_to_int;
-        input [3:0] n;
-        begin
-            sx4_to_int = $signed({{28{n[3]}}, n});  // 4->32 bits with sign
-        end
+    // Lower 48 bits: [47:32]=source(16b), [31:0]=dest(32b) for logging
+    function [63:0] mkflit_sd;
+        input vc, xdir, ydir;
+        input [3:0] xhops, yhops;
+        input [15:0] src16;
+        input [31:0] dst32;
+        reg [63:0] f;
+    begin
+        f                       = 64'h0;
+        f[VC_BIT]               = vc;
+        f[DIR_X_BIT]            = xdir;
+        f[DIR_Y_BIT]            = ydir;
+        f[HOP_X_HI:HOP_X_LO]    = xhops[3:0];
+        f[HOP_Y_HI:HOP_Y_LO]    = yhops[3:0];
+        f[47:32]                = src16;
+        f[31:0]                 = dst32;
+        mkflit_sd               = f;
+    end
     endfunction
 
-    // Monitor sends (external VC = ~polarity)
-    always @(posedge clk) begin
-        if (upso)    $display("[Cyc %0d | pol=%0d] UP    send : %h (X=%0d, Y=%0d)",   cyc, polarity, updo,
-            sx4_to_int(updo[55:52]), sx4_to_int(updo[51:48]));
-        if (downso)  $display("[Cyc %0d | pol=%0d] DOWN  send : %h (X=%0d, Y=%0d)",   cyc, polarity, downdo,
-            sx4_to_int(downdo[55:52]), sx4_to_int(downdo[51:48]));
-        if (leftso)  $display("[Cyc %0d | pol=%0d] LEFT  send : %h (X=%0d, Y=%0d)",   cyc, polarity, leftdo,
-            sx4_to_int(leftdo[55:52]), sx4_to_int(leftdo[51:48]));
-        if (rightso) $display("[Cyc %0d | pol=%0d] RIGHT send : %h (X=%0d, Y=%0d)",   cyc, polarity, rightdo,
-            sx4_to_int(rightdo[55:52]), sx4_to_int(rightdo[51:48]));
-        if (peso)    $display("[Cyc %0d | pol=%0d] PE    send : %h (X=%0d, Y=%0d)",   cyc, polarity, pedo,
-            sx4_to_int(pedo[55:52]), sx4_to_int(pedo[51:48]));
+    function [3:0] xhops_of; input [63:0] f; begin xhops_of=f[HOP_X_HI:HOP_X_LO]; end endfunction
+    function [3:0] yhops_of; input [63:0] f; begin yhops_of=f[HOP_Y_HI:HOP_Y_LO]; end endfunction
+
+    // ---------------- Negedge injection w/ ready handshake ----------------
+    // port: 0=UP,1=DOWN,2=LEFT,3=RIGHT,4=PE
+    task inject_one;
+        input integer port;
+        input [63:0] flit;
+    begin
+        case (port)
+        0: begin while(!upri) @(posedge clk); @(negedge clk); updi<=flit; upsi<=1'b1; @(posedge clk); @(negedge clk); upsi<=1'b0; end
+        1: begin while(!downri) @(posedge clk); @(negedge clk); downdi<=flit; downsi<=1'b1; @(posedge clk); @(negedge clk); downsi<=1'b0; end
+        2: begin while(!leftri) @(posedge clk); @(negedge clk); leftdi<=flit; leftsi<=1'b1; @(posedge clk); @(negedge clk); leftsi<=1'b0; end
+        3: begin while(!rightri) @(posedge clk); @(negedge clk); rightdi<=flit; rightsi<=1'b1; @(posedge clk); @(negedge clk); rightsi<=1'b0; end
+        4: begin while(!peri)   @(posedge clk); @(negedge clk); pedi<=flit; pesi<=1'b1; @(posedge clk); @(negedge clk); pesi<=1'b0; end
+        endcase
+    end
+    endtask
+
+    // ---------------- Monitors (console) ----------------
+    always @(posedge clk) if (upso)
+        $display("[Cyc %0d] (@UP OUT)    %016h  xhop=%0d yhop=%0d pol=%0d", cyc, updo, xhops_of(updo), yhops_of(updo), polarity);
+    always @(posedge clk) if (downso)
+        $display("[Cyc %0d] (@DOWN OUT)  %016h  xhop=%0d yhop=%0d pol=%0d", cyc, downdo, xhops_of(downdo), yhops_of(downdo), polarity);
+    always @(posedge clk) if (leftso)
+        $display("[Cyc %0d] (@LEFT OUT)  %016h  xhop=%0d yhop=%0d pol=%0d", cyc, leftdo, xhops_of(leftdo), yhops_of(leftdo), polarity);
+    always @(posedge clk) if (rightso)
+        $display("[Cyc %0d] (@RIGHT OUT) %016h  xhop=%0d yhop=%0d pol=%0d", cyc, rightdo, xhops_of(rightdo), yhops_of(rightdo), polarity);
+    always @(posedge clk) if (peso)
+        $display("[Cyc %0d] (@PE OUT)    %016h  xhop=%0d yhop=%0d pol=%0d", cyc, pedo, xhops_of(pedo), yhops_of(pedo), polarity);
+
+
+    // ---------------- Introspection for contention demo ----------------
+    wire [4:0] req_up_even, gnt_up_even, prio_up_even;
+    assign req_up_even  = DUT.ARB_EVEN.req_up;
+    assign gnt_up_even  = DUT.ARB_EVEN.gnt_up;
+    assign prio_up_even = DUT.ARB_EVEN.RRARB_UP.priority;
+
+    always @(posedge clk) if (polarity==1'b0) begin
+        if (gnt_up_even!=5'b0)
+        $display("[Cyc %0d] EVEN-ARB UP: prio=%05b req=%05b gnt=%05b", cyc, prio_up_even, req_up_even, gnt_up_even);
     end
 
-    // Build a flit with XY hop nibbles
-    function [63:0] mk_xy_flit;
-        input [3:0] x4; // signed nibble
-        input [3:0] y4; // signed nibble
-        input [31:0] tag;
-        begin
-            mk_xy_flit = {8'h00, x4, y4, 16'h0000, tag};
-        end
-    endfunction
+    // ---------------- Stimulus ----------------
+    task wait_cycles; input integer n; integer k; begin for(k=0;k<n;k=k+1) @(posedge clk); end endtask
 
-    // Handshake-safe inject tasks
-    task inject_up;    input [63:0] flit; begin updi   <= flit; upsi   <= 1'b1; while(!upri)   @(posedge clk); @(posedge clk); upsi   <= 1'b0; end endtask
-    task inject_down;  input [63:0] flit; begin downdi <= flit; downsi <= 1'b1; while(!downri) @(posedge clk); @(posedge clk); downsi <= 1'b0; end endtask
-    task inject_left;  input [63:0] flit; begin leftdi <= flit; leftsi <= 1'b1; while(!leftri) @(posedge clk); @(posedge clk); leftsi <= 1'b0; end endtask
-    task inject_right; input [63:0] flit; begin rightdi<= flit; rightsi<= 1'b1; while(!rightri)@(posedge clk); @(posedge clk); rightsi<= 1'b0; end endtask
-    task inject_pe;    input [63:0] flit; begin pedi   <= flit; pesi   <= 1'b1; while(!peri)   @(posedge clk); @(posedge clk); pesi   <= 1'b0; end endtask
-
-    // Stimulus
     initial begin
-        cyc = 0;
-        reset = 1;
-        upsi=0;   updi=0;    upro=1;
-        downsi=0; downdi=0;  downro=1;
-        leftsi=0; leftdi=0;  leftro=1;
-        rightsi=0; rightdi=0; rightro=1;
-        pesi=0;   pedi=0;    pero=1;
+        // init
+        upsi=0; downsi=0; leftsi=0; rightsi=0; pesi=0;
+        updi=0; downdi=0; leftdi=0; rightdi=0; pedi=0;
+        upro=1; downro=1; leftro=1; rightro=1; pero=1;
 
-        // reset two cycles
-        repeat(2) @(posedge clk);
-        reset = 0;
-        $display(">> Reset deasserted at cyc=%0d", cyc);
+        reset=1; cyc=0; wait_cycles(4); reset=0;
+        $display(">> Reset deasserted @ cycle %0d", cyc);
 
-        // SCEN 1: PE → RIGHT (X=+2, Y=+1)  tag=0xA000_0001
-        inject_pe   (mk_xy_flit( 4'sd2,  4'sd1, 32'hA000_0001));
-        repeat(6) @(posedge clk);
+        // ---------------- TC1: LEFT -> RIGHT ----------------
+        $display("\n===== TC1: LEFT->RIGHT (xh=1, dir=RIGHT) =====");
+        inject_one(2, mkflit_sd(1'b0, 1'b0/*RIGHT*/, 1'b0, 4'd1, 4'd0, 16'd2, 32'd16));
+        wait_cycles(8);
 
-        // SCEN 2: PE → LEFT (X=-3, Y=0)    tag=0xA000_0002
-        inject_pe   (mk_xy_flit(-4'sd3,  4'sd0, 32'hA000_0002));
-        repeat(6) @(posedge clk);
+        // ---------------- TC2: UP -> DOWN ----------------
+        $display("\n===== TC2: UP->DOWN (yh=1, dir=DOWN) =====");
+        inject_one(0, mkflit_sd(1'b0, 1'b0, 1'b0/*DOWN*/, 4'd0, 4'd1, 16'd0, 32'd8));
+        wait_cycles(8);
 
-        // SCEN 3: UP  → DOWN (X=0,  Y=+2)  tag=0xA000_0003
-        inject_up   (mk_xy_flit( 4'sd0,  4'sd2, 32'hA000_0003));
-        repeat(6) @(posedge clk);
+        // ---------------- TC3: RIGHT -> PE (at dest) ----------------
+        $display("\n===== TC3: RIGHT->PE (xh=0,yh=0) =====");
+        inject_one(3, mkflit_sd(1'b0, 1'b0, 1'b0, 4'd0, 4'd0, 16'd3, 32'd3));
+        wait_cycles(8);
 
-        // SCEN 4: DOWN→ UP   (X=0,  Y=-1)  tag=0xA000_0004
-        inject_down (mk_xy_flit( 4'sd0, -4'sd1, 32'hA000_0004));
-        repeat(6) @(posedge clk);
+        // ---------------- TC4: UP -> RIGHT (xh=2 -> 1) ----------------
+        $display("\n===== TC4: UP->RIGHT xh=2 (verify decrement) =====");
+        inject_one(0, mkflit_sd(1'b0, 1'b0/*RIGHT*/, 1'b0, 4'd2, 4'd0, 16'd0, 32'd4));
+        wait_cycles(12);
 
-        // SCEN 5: Contention on RIGHT (same VC window)
-        fork
-        inject_pe  (mk_xy_flit( 4'sd1,  4'sd0, 32'hA000_0011));
-        inject_left(mk_xy_flit( 4'sd2,  4'sd0, 32'hA000_0012));
-        join
-        repeat(10) @(posedge clk);
+        // ---------------- TC5: Contention on UP (LEFT vs RIGHT), show RR rotate ----------------
+        $display("\n===== TC5: Contention on UP output (RR rotates) =====");
+        // Wait until external=EVEN next cycle (inject on negedge when polarity==1)
+        while (polarity != 1'b1) @(posedge clk);
+        // Drive both in same negedge
+        while (!(leftri && rightri)) @(posedge clk);
+        @(negedge clk);
+        leftdi  <= mkflit_sd(1'b0, 1'b0, 1'b1/*UP*/, 4'd0, 4'd1, 16'd2, 32'd100);
+        rightdi <= mkflit_sd(1'b0, 1'b0, 1'b1/*UP*/, 4'd0, 4'd1, 16'd3, 32'd101);
+        leftsi  <= 1'b1;
+        rightsi <= 1'b1;
+        @(posedge clk); @(negedge clk);
+        leftsi  <= 1'b0;
+        rightsi <= 1'b0;
 
-        // SCEN 6: Backpressure on RIGHT
-        rightro = 0;
-        inject_pe  (mk_xy_flit( 4'sd1,  4'sd0, 32'hA000_0021));
-        repeat(8) @(posedge clk);
-        rightro = 1;
-        repeat(8) @(posedge clk);
+        // Let first EVEN arbitration happen (observe grant/priority line)
+        @(posedge clk);
+        // Before next EVEN arbitration, re-arm LEFT only; RIGHT still pending → RR should rotate
+        while (polarity != 1'b1) @(posedge clk);
+        while (!leftri) @(posedge clk);
+        inject_one(2, mkflit_sd(1'b0, 1'b0, 1'b1/*UP*/, 4'd0, 4'd1, 16'd2, 32'd102));
+        wait_cycles(8);
 
-        // SCEN 7: Local delivery X=0,Y=0 from RIGHT and LEFT
-        inject_right(mk_xy_flit( 4'sd0,  4'sd0, 32'hA000_0031));
-        inject_left (mk_xy_flit( 4'sd0,  4'sd0, 32'hA000_0032));
-        repeat(10) @(posedge clk);
+        // ---------------- TC6: Backpressure LEFT output ----------------
+        $display("\n===== TC6: Backpressure LEFT output; RIGHT proceeds =====");
+        leftro = 1'b0; // stall LEFT
+        inject_one(1, mkflit_sd(1'b0, 1'b1/*LEFT*/, 1'b0, 4'd1, 4'd0, 16'd1, 32'd200)); // DOWN->LEFT (blocked)
+        inject_one(0, mkflit_sd(1'b0, 1'b0/*RIGHT*/,1'b0, 4'd1, 4'd0, 16'd0, 32'd201)); // UP->RIGHT (free)
+        wait_cycles(9);
+        $display("[Cyc %0d] Releasing LEFT backpressure", cyc);
+        leftro = 1'b1;
+        wait_cycles(8);
 
-        $display(">> TB finished at cyc=%0d", cyc);
+        $display("\nAll testcases executed. Stopping.");
         $finish;
+    end
+
+    // ---------------- Timeout ----------------
+    initial begin
+        #50000;
+        $display("TIMEOUT"); $finish;
     end
 
 endmodule

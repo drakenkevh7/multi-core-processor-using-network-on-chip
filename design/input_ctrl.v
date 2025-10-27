@@ -42,6 +42,12 @@ module input_ctrl (
     wire can_accept_even = ext_even && !valid_even;
     wire can_accept_odd  = ext_odd  && !valid_odd;
 
+    // This drives me crazy...
+    // After several hours of debugging, this seems to be the culprit...
+    // I hate this =(
+    always @(*) begin
+        ready_in <= ext_even ? ~valid_even : ~valid_odd;
+    end
 
 	always @(posedge clk) begin
 		if (reset) begin
@@ -56,7 +62,7 @@ module input_ctrl (
 			// If even is not occupied, it is ready for new package.
 			// If polarity == 0, internal is even, external is odd.
 			// If odd is not occupied, it is ready for new package.
-			ready_in <= ext_even ? ~valid_even : ~valid_odd;
+			
 
 			// Latch input if valid and channel empty.
             if (send_in && can_accept_even) begin

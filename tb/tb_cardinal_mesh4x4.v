@@ -1,5 +1,5 @@
 /////////////////////////////////////////////////////////////////
-// tb_cardinal_mesh4x4.v  (Verilog-2001 compliant)
+//       testbench: tb_cardinal_mesh4x4.v
 /////////////////////////////////////////////////////////////////
 
 `timescale 1ns/1ps
@@ -8,6 +8,7 @@ module tb_cardinal_mesh4x4;
     // Clock & reset
     reg clk, reset;
     integer cyc;
+    reg polarity;
 
     // Local PE interfaces
     reg pesi_0_0; reg  [63:0] pedi_0_0; wire peri_0_0; wire peso_0_0; reg  pero_0_0; wire [63:0] pedo_0_0;
@@ -30,7 +31,7 @@ module tb_cardinal_mesh4x4;
     reg pesi_3_2; reg  [63:0] pedi_3_2; wire peri_3_2; wire peso_3_2; reg  pero_3_2; wire [63:0] pedo_3_2;
     reg pesi_3_3; reg  [63:0] pedi_3_3; wire peri_3_3; wire peso_3_3; reg  pero_3_3; wire [63:0] pedo_3_3;
 
-    // Polarity outputs
+    // Optional polarity taps (unused here, but wired)
     wire polarity_0_0, polarity_0_1, polarity_0_2, polarity_0_3;
     wire polarity_1_0, polarity_1_1, polarity_1_2, polarity_1_3;
     wire polarity_2_0, polarity_2_1, polarity_2_2, polarity_2_3;
@@ -66,11 +67,15 @@ module tb_cardinal_mesh4x4;
         .polarity_3_0(polarity_3_0), .polarity_3_1(polarity_3_1), .polarity_3_2(polarity_3_2), .polarity_3_3(polarity_3_3)
     );
 
-    // Clock: 250 MHz
+    // 250 MHz clock
     initial begin
         clk = 1'b0;
         forever #2 clk = ~clk;
     end
+	always @(posedge clk) begin
+		if (reset) polarity <= 1'b0;
+		else       polarity <= ~polarity;
+	end
 
     // Cycle counter
     always @(posedge clk) begin
@@ -78,79 +83,49 @@ module tb_cardinal_mesh4x4;
         else       cyc <= cyc + 1;
     end
 
-    // Header bit positions
-    localparam VC_BIT      = 63;
-    localparam DIR_X_BIT   = 62; // 1: LEFT,  0: RIGHT
-    localparam DIR_Y_BIT   = 61; // 1: UP,    0: DOWN
-    localparam HOP_X_HI    = 55;
-    localparam HOP_X_LO    = 52; // 4-bit unsigned
-    localparam HOP_Y_HI    = 51;
-    localparam HOP_Y_LO    = 48; // 4-bit unsigned
-    localparam SRC_X_HI    = 47;
-    localparam SRC_X_LO    = 40; // 8 bits
-    localparam SRC_Y_HI    = 39;
-    localparam SRC_Y_LO    = 33; // 7 bits (bit 32 unused)
-    integer error_count = 0;
+    // Header bit positions (for logging decode)
+    localparam VC_BIT    = 63;
+    localparam DIR_X_BIT = 62;
+    localparam DIR_Y_BIT = 61;
+    localparam HOP_X_HI  = 55;
+    localparam HOP_X_LO  = 52;
+    localparam HOP_Y_HI  = 51;
+    localparam HOP_Y_LO  = 48;
+    localparam SRC_X_HI  = 47;
+    localparam SRC_X_LO  = 40;
+    localparam SRC_Y_HI  = 39;
+    localparam SRC_Y_LO  = 32;
 
-    // Compute flit header directly from (src_i,src_j) and (dst_i,dst_j)
-  // Compute flit header directly from (src_i,src_j) and (dst_i,dst_j)
+    // Timeouts
+    parameter PHASE_TIMEOUT = 24; // cycles per phase (adjust if needed)
+
+    // ---------- Helpers ----------
     function [63:0] mk_xy_flit_xy;
-    input integer src_i, src_j;  // row, col  (i = 0..3, j = 0..3)
-    input integer dst_i, dst_j;
-    input [31:0]  tag;
-
-    reg        dirx, diry;       // 1: LEFT/UP, 0: RIGHT/DOWN
-    reg  [3:0] dx, dy;           // unsigned hop counts (<= 15)
-    reg  [7:0] src_x8;           // SRC_X field (j)
-    reg  [6:0] src_y7;           // SRC_Y field (i)
+        input integer src_i, src_j;
+        input integer dst_i, dst_j;
+        input [31:0] tag;   // payload (we put PhaseID in tag[7:0])
+        reg dirx, diry;
+        reg [3:0] dx, dy;
+        reg [7:0] src_x8;
+        reg [7:0] src_y8;
     begin
-        // X direction & magnitude
-        if (dst_j < src_j) begin
-            dirx = 1'b1;               // LEFT
-            dx   = (src_j - dst_j);    // truncates to 4 bits
-        // dx = (src_j - dst_j) & 4'hF; // alternative, explicit mask
-        end else begin
-            dirx = 1'b0;               // RIGHT
-            dx   = (dst_j - src_j);
-        // dx = (dst_j - src_j) & 4'hF;
-        end
-
-        // Y direction & magnitude
-        // Mesh convention in your TB: row 0 bottom, row increases upward
-        // UP when dst_i > src_i, DOWN when dst_i < src_i
-        if (dst_i > src_i) begin
-            diry = 1'b1;               // UP
-            dy   = (dst_i - src_i);
-        // dy = (dst_i - src_i) & 4'hF;
-        end else begin
-            diry = 1'b0;               // DOWN
-            dy   = (src_i - dst_i);
-        // dy = (src_i - dst_i) & 4'hF;
-        end
-
-        // SRC fields (carried through; not used by arbitrator)
+        if (dst_j < src_j) begin dirx = 1'b1; dx = (src_j - dst_j); end
+        else               begin dirx = 1'b0; dx = (dst_j - src_j); end
+        if (dst_i > src_i) begin diry = 1'b1; dy = (dst_i - src_i); end
+        else               begin diry = 1'b0; dy = (src_i - dst_i); end
         src_x8 = src_j[7:0];
-        src_y7 = src_i[6:0];
-
-        // Pack: {VC, DIR_X, DIR_Y, 5'b0, HOP_X[3:0], HOP_Y[3:0], SRC_X[7:0], SRC_Y[6:0], 1'b0, TAG[31:0]}
-        mk_xy_flit_xy = {1'b0, dirx, diry, 5'b0, dx, dy, src_x8, src_y7, 1'b0, tag};
+        src_y8 = src_i[7:0];
+        mk_xy_flit_xy = {polarity, dirx, diry, 5'b0, dx, dy, src_x8, src_y8, tag};
     end
     endfunction
 
-    function integer rand4;
-    input integer dummy;
-    integer r;
-    begin
-        r = $random;
-        if (r < 0) r = -r;
-        rand4 = r % 4;
-    end
-    endfunction
+    // Map node id <0..15> <-> (i,j)
+    function integer node_id; input integer i,j; begin node_id = i*4 + j; end endfunction
+    function integer id_i;    input integer id;  begin id_i    = id/4;   end endfunction
+    function integer id_j;    input integer id;  begin id_j    = id%4;   end endfunction
 
-    // ---------- Setters / Getters ----------
-    task set_pesi;
-    input integer i, j;
-    input v;
+    // Signal accessors
+    task set_pesi; input integer i,j; input v;
     begin case ({i[3:0],j[3:0]})
         8'h00: pesi_0_0=v; 8'h01: pesi_0_1=v; 8'h02: pesi_0_2=v; 8'h03: pesi_0_3=v;
         8'h10: pesi_1_0=v; 8'h11: pesi_1_1=v; 8'h12: pesi_1_2=v; 8'h13: pesi_1_3=v;
@@ -159,9 +134,7 @@ module tb_cardinal_mesh4x4;
     endcase end
     endtask
 
-    task set_pedi;
-    input integer i, j;
-    input [63:0] d;
+    task set_pedi; input integer i,j; input [63:0] d;
     begin case ({i[3:0],j[3:0]})
         8'h00: pedi_0_0=d; 8'h01: pedi_0_1=d; 8'h02: pedi_0_2=d; 8'h03: pedi_0_3=d;
         8'h10: pedi_1_0=d; 8'h11: pedi_1_1=d; 8'h12: pedi_1_2=d; 8'h13: pedi_1_3=d;
@@ -170,8 +143,7 @@ module tb_cardinal_mesh4x4;
     endcase end
     endtask
 
-    function get_peri;
-    input integer i, j;
+    function get_peri; input integer i,j;
     begin case ({i[3:0],j[3:0]})
         8'h00: get_peri=peri_0_0; 8'h01: get_peri=peri_0_1; 8'h02: get_peri=peri_0_2; 8'h03: get_peri=peri_0_3;
         8'h10: get_peri=peri_1_0; 8'h11: get_peri=peri_1_1; 8'h12: get_peri=peri_1_2; 8'h13: get_peri=peri_1_3;
@@ -181,8 +153,7 @@ module tb_cardinal_mesh4x4;
     endcase end
     endfunction
 
-    function get_peso;
-    input integer i, j;
+    function get_peso; input integer i,j;
     begin case ({i[3:0],j[3:0]})
         8'h00: get_peso=peso_0_0; 8'h01: get_peso=peso_0_1; 8'h02: get_peso=peso_0_2; 8'h03: get_peso=peso_0_3;
         8'h10: get_peso=peso_1_0; 8'h11: get_peso=peso_1_1; 8'h12: get_peso=peso_1_2; 8'h13: get_peso=peso_1_3;
@@ -192,8 +163,7 @@ module tb_cardinal_mesh4x4;
     endcase end
     endfunction
 
-    function [63:0] get_pedo;
-    input integer i, j;
+    function [63:0] get_pedo; input integer i,j;
     begin case ({i[3:0],j[3:0]})
         8'h00: get_pedo=pedo_0_0; 8'h01: get_pedo=pedo_0_1; 8'h02: get_pedo=pedo_0_2; 8'h03: get_pedo=pedo_0_3;
         8'h10: get_pedo=pedo_1_0; 8'h11: get_pedo=pedo_1_1; 8'h12: get_pedo=pedo_1_2; 8'h13: get_pedo=pedo_1_3;
@@ -203,160 +173,34 @@ module tb_cardinal_mesh4x4;
     endcase end
     endfunction
 
-    // Handshake-correct injection
-    task inject_local;
-    input integer i, j;
-    input [63:0] flit;
-    begin
-        set_pedi(i,j, flit);
-        set_pesi(i,j, 1'b1);
-        while (!get_peri(i,j)) @(posedge clk);
-        @(posedge clk);
-        set_pesi(i,j, 1'b0);
-        $display("[Cyc %3d] Injected @(%0d,%0d): %h", cyc, i, j, flit);
-    end
-    endtask
+    // ---------- Files ----------
+    integer fh_time;
+    integer fh_log;
 
-    // Wait for delivery with timeout
-    task wait_delivery;
-    input integer i, j, timeout;
-    output success;
-    integer t;
-    begin
-        success = 1'b0;
-        t = 0;
-        while (!get_peso(i,j) && t < timeout) begin t = t + 1; @(posedge clk); end
-        success = get_peso(i,j);
-        end
-    endtask
-
-    // Check offsets cleared and tag matches
-    task check_zero_hops_and_tag;
-    input integer i, j;
-    input [31:0] tag;
-    reg [63:0] f;
-    begin
-        f = get_pedo(i,j);
-        if (f[31:0] === tag && f[55:52] == 4'h0 && f[51:48] == 4'h0)
-        $display("      PASS: (@%0d,%0d) flit ok: %h", i, j, f);
-        else begin
-            $display("      FAIL: (@%0d,%0d) got %h (tag/offsets mismatch)", i, j, f);
-            error_count = error_count + 1;
-        end
-    end
-    endtask
-
-    // Inject two sources in the SAME cycle (when both PERI are high)
-    task inject_two_same_cycle;
-    input integer i1, j1; input [63:0] flit1;
-    input integer i2, j2; input [63:0] flit2;
-    begin
-        set_pedi(i1, j1, flit1);
-        set_pedi(i2, j2, flit2);
-        // Wait until BOTH local inputs are ready
-        while (!(get_peri(i1,j1) && get_peri(i2,j2))) @(posedge clk);
-        @(posedge clk);
-        set_pesi(i1, j1, 1'b1);
-        set_pesi(i2, j2, 1'b1);
-        $display("[Cyc %3d] Injected2 @(%0d,%0d) %h  &&  @(%0d,%0d) %h",
-                cyc, i1,j1,flit1, i2,j2,flit2);
-        @(posedge clk);
-        set_pesi(i1, j1, 1'b0);
-        set_pesi(i2, j2, 1'b0);
-    end
-    endtask
-
-    // Wait for two arrivals at (di,dj), capture both flits exactly when peso is asserted
-    task wait_two_at;
-    input  integer di, dj, timeout;
-    input  [31:0] taga, tagb;
-    output integer first_is_a;     // 1 if A first; 0 if B first; -1 on timeout
-    output [63:0] f_first, f_second;
-    integer t;
-    reg [63:0] f;
-    begin
-        first_is_a = -1;
-        f_first  = 64'h0;
-        f_second = 64'h0;
-
-        // First arrival
-        t = 0;
-        while (!get_peso(di,dj) && t < timeout) begin t = t + 1; @(posedge clk); end
-        if (!get_peso(di,dj)) begin
-        $display("ERROR: timeout waiting first arrival @(%0d,%0d)", di,dj);
-        disable wait_two_at;
-        end
-        // SAMPLE IMMEDIATELY on the arrival cycle
-        f = get_pedo(di,dj);
-        f_first = f;
-        if      (f[31:0] == taga) first_is_a = 1;
-        else if (f[31:0] == tagb) first_is_a = 0;
-        else $display("WARN: unexpected first tag @(%0d,%0d): %h", di,dj,f);
-
-        // Advance one cycle so sink consumes it
-        @(posedge clk);
-
-        // Second arrival
-        t = 0;
-        while (!get_peso(di,dj) && t < timeout) begin t = t + 1; @(posedge clk); end
-        if (!get_peso(di,dj)) begin
-        $display("ERROR: timeout waiting second arrival @(%0d,%0d)", di,dj);
-        disable wait_two_at;
-        end
-        // SAMPLE IMMEDIATELY on the arrival cycle
-        f_second = get_pedo(di,dj);
-    end
-    endtask
-
-    reg [31:0] tagaA, tagbA;
-    integer firstA;
-    reg [63:0] fA_first, fA_second;
-
-    task check_flit_word;
-    input integer di, dj;
-    input [63:0] f;
-    input [31:0] tag;
-    begin
-        if (f[31:0] === tag && f[HOP_X_HI:HOP_X_LO] == 4'h0 && f[HOP_Y_HI:HOP_Y_LO] == 4'h0)
-        $display("      PASS: (@%0d,%0d) flit ok: %h", di, dj, f);
-        else begin
-        $display("      FAIL: (@%0d,%0d) got %h (tag/offsets mismatch)", di, dj, f);
-        error_count = error_count + 1;
-        end
-    end
-    endtask
-
-
-    // ========== Stimulus ==========
-
-    integer i, j, dst_i, dst_j, tries, si, sj;
+    // ---------- Stimulus (Gather) ----------
+    integer i, j, k, start_cyc, end_cyc;
+    integer di, dj;                // destination coords for this phase
     reg [31:0] tag;
-    reg ok;
 
-    // Monitor local ejections (optional)
-    always @(posedge clk) begin
-        if (peso_0_0) $display("[Cyc %3d] (@0,0) OUT %h", cyc, pedo_0_0);
-        if (peso_0_1) $display("[Cyc %0d] (@0,1) OUT %h", cyc, pedo_0_1);
-        if (peso_0_2) $display("[Cyc %0d] (@0,2) OUT %h", cyc, pedo_0_2);
-        if (peso_0_3) $display("[Cyc %0d] (@0,3) OUT %h", cyc, pedo_0_3);
-        if (peso_1_0) $display("[Cyc %0d] (@1,0) OUT %h", cyc, pedo_1_0);
-        if (peso_1_1) $display("[Cyc %0d] (@1,1) OUT %h", cyc, pedo_1_1);
-        if (peso_1_2) $display("[Cyc %0d] (@1,2) OUT %h", cyc, pedo_1_2);
-        if (peso_1_3) $display("[Cyc %0d] (@1,3) OUT %h", cyc, pedo_1_3);
-        if (peso_2_0) $display("[Cyc %0d] (@2,0) OUT %h", cyc, pedo_2_0);
-        if (peso_2_1) $display("[Cyc %0d] (@2,1) OUT %h", cyc, pedo_2_1);
-        if (peso_2_2) $display("[Cyc %0d] (@2,2) OUT %h", cyc, pedo_2_2);
-        if (peso_2_3) $display("[Cyc %0d] (@2,3) OUT %h", cyc, pedo_2_3);
-        if (peso_3_0) $display("[Cyc %0d] (@3,0) OUT %h", cyc, pedo_3_0);
-        if (peso_3_1) $display("[Cyc %0d] (@3,1) OUT %h", cyc, pedo_3_1);
-        if (peso_3_2) $display("[Cyc %0d] (@3,2) OUT %h", cyc, pedo_3_2);
-        if (peso_3_3) $display("[Cyc %0d] (@3,3) OUT %h", cyc, pedo_3_3);
-    end
+    // Buffers / bookkeeping for handshake (Verilog-2001 memories & bitmasks)
+    reg [63:0] flit_buf [0:15];    // precomputed flits per source id
+    reg [15:0] pending;            // 1 => this source still needs to inject
+    reg [15:0] asserted;           // 1 => pesi currently asserted
+    reg [15:0] accept_mask;        // who was accepted at this posedge
+    integer    accepted_cnt;
+    integer    recv_cnt;
+    integer    phase_cycles;
+
+    // Decode helpers for logging
+    integer src_i, src_j;
+    reg [63:0] f;
+
+    integer id, si, sj;
+    // 250 MHz clock already defined
 
     initial begin
-
         // Init
-        reset = 1; cyc = 0;
+        reset = 1'b1; cyc = 0;
 
         pesi_0_0=0; pedi_0_0=64'd0; pero_0_0=1;
         pesi_0_1=0; pedi_0_1=64'd0; pero_0_1=1;
@@ -378,153 +222,155 @@ module tb_cardinal_mesh4x4;
         pesi_3_2=0; pedi_3_2=64'd0; pero_3_2=1;
         pesi_3_3=0; pedi_3_3=64'd0; pero_3_3=1;
 
+        // Open files
+        fh_time = $fopen("start_end_time.out","w");
+        fh_log  = $fopen("gather_all.txt","w");
+        $fdisplay(fh_time, "Gather testbench start");
+
         // Reset
         repeat (6) @(posedge clk);
-        reset = 0;
+        reset = 1'b0;
         $display(">> Reset deasserted @ cycle %0d", cyc);
 
-        // 1) Corner (0,0)->(3,3)
-        tag = 32'hA000_0001;
-        inject_local(0,0, mk_xy_flit_xy(0,0, 3,3, tag));
-        wait_delivery(3,3, 240, ok);
-        if (!ok) $display("ERROR: corner timeout");
-        else     check_zero_hops_and_tag(3,3, tag);
+        // ---------- Phases 0..15 ----------
+        // k = 0;
+        for (k=0; k<16; k=k+1) begin
+        di = id_i(k);
+        dj = id_j(k);
 
-        // 2) Row (1,0)->(1,3)
-        tag = 32'hA000_0002;
-        inject_local(1,0, mk_xy_flit_xy(1,0, 1,3, tag));
-        wait_delivery(1,3, 240, ok);
-        if (!ok) $display("ERROR: row timeout");
-        else     check_zero_hops_and_tag(1,3, tag);
+        // Prepare flits and masks
+        pending      = 16'h0000;
+        asserted     = 16'h0000;
+        accept_mask  = 16'h0000;
+        accepted_cnt = 0;
+        recv_cnt     = 0;
+        phase_cycles = 0;
 
-        // 3) Column (0,2)->(3,2)
-        tag = 32'hA000_0003;
-        inject_local(0,2, mk_xy_flit_xy(0,2, 3,2, tag));
-        wait_delivery(3,2, 240, ok);
-        if (!ok) $display("ERROR: column timeout");
-        else     check_zero_hops_and_tag(3,2, tag);
-
-        // 4) Local loopback (all nodes)
-        $display(">> Local loopback (all 16 nodes)");
-        for (i=0;i<4;i=i+1) begin
-            for (j=0;j<4;j=j+1) begin
-                tag = 32'hB000_0000 | (i*4 + j);
-                inject_local(i, j, mk_xy_flit_xy(i, j, i, j, tag));
-                wait_delivery(i,j, 100, ok);
-                if (!ok) $display("ERROR: loopback timeout @(%0d,%0d)", i,j);
-                else     check_zero_hops_and_tag(i,j, tag);
+        tag = {24'b1, k[7:0]};
+        // Precompute payload: tag[7:0] carries destination id (=phase number)
+        
+        for (i=0; i<4; i=i+1) begin
+            for (j=0; j<4; j=j+1) begin
+            if (!(i==di && j==dj)) begin
+                flit_buf[node_id(i,j)] = mk_xy_flit_xy(i, j, di, dj, tag);
+                pending[node_id(i,j)]  = 1'b1;
+            end
             end
         end
+        // i = 2;
+        // j = 3;
+        flit_buf[node_id(i,j)] = mk_xy_flit_xy(i, j, di, dj, tag);
+        pending[node_id(i,j)]  = 1'b1;
 
-        // 5) Random pairs
-        $display(">> Randomized tests");
-        for (tries=0; tries<8; tries=tries+1) begin
-            si = rand4(0); sj = rand4(0); dst_i = rand4(0); dst_j = rand4(0);
-            if (dst_i==si && dst_j==sj) dst_j = (dst_j+1)%4;
-            tag = 32'hC000_0000 + tries;
-            $display("  rnd%0d: (%0d,%0d)->(%0d,%0d)", tries, si,sj, dst_i,dst_j);
-            inject_local(si, sj, mk_xy_flit_xy(si, sj, dst_i, dst_j, tag));
-            wait_delivery(dst_i, dst_j, 300, ok);
-            if (!ok) $display("ERROR: random%0d timeout", tries);
-            else     check_zero_hops_and_tag(dst_i, dst_j, tag);
-        end
+        start_cyc = cyc + 1;
+        $fdisplay(fh_time, "Phase %0d start_cycle=%0d (dest=(%0d,%0d))", k, start_cyc, di, dj);
 
-        // 6) Link sweep: exercise every neighbor link (both directions)
-        $display(">> Link sweep (1-hop across every link)");
+        // Main per-phase loop (no fork/join)
+        // Drives many sources over multiple cycles; each holds pesi until accepted.
+        while ((recv_cnt < 15) && (phase_cycles < PHASE_TIMEOUT)) begin
+            
 
-        // 6a) Horizontal: rightward (j -> j+1)
-        for (i=0;i<4;i=i+1) begin
-            for (j=0;j<3;j=j+1) begin
-                tag = 32'hB100_0000 | (i*8 + j); // unique-ish
-                inject_local(i, j, mk_xy_flit_xy(i, j, i, j+1, tag));
-                wait_delivery(i, j+1, 120, ok);
-                if (!ok) $display("ERROR: horiz right timeout @(%0d,%0d)->(%0d,%0d)", i,j,i,j+1);
-                else     check_zero_hops_and_tag(i, j+1, tag);
+            // NEGEDGE A: assert any ready sources that are pending and not yet asserted
+            @(negedge clk);
+            for (id=0; id<16; id=id+1) begin
+            if (pending[id] && !asserted[id]) begin
+                si = id_i(id); sj = id_j(id);
+                // $display(si, sj);
+                if (get_peri(si,sj)) begin
+                set_pedi(si, sj, flit_buf[id]);
+                set_pesi(si, sj, 1'b1);
+                asserted[id] = 1'b1;
+                end
             end
-        end
-
-        // 6b) Horizontal: leftward (j -> j-1)
-        for (i=0;i<4;i=i+1) begin
-            for (j=1;j<4;j=j+1) begin
-                tag = 32'hB101_0000 | (i*8 + j);
-                inject_local(i, j, mk_xy_flit_xy(i, j, i, j-1, tag));
-                wait_delivery(i, j-1, 120, ok);
-                if (!ok) $display("ERROR: horiz left timeout @(%0d,%0d)->(%0d,%0d)", i,j,i,j-1);
-                else     check_zero_hops_and_tag(i, j-1, tag);
             end
-        end
 
-        // 6c) Vertical: “up” in the mesh sense (i -> i+1, dy < 0 because row0 is bottom)
-        for (i=0;i<3;i=i+1) begin
-            for (j=0;j<4;j=j+1) begin
-                tag = 32'hB102_0000 | (i*8 + j);
-                inject_local(i, j, mk_xy_flit_xy(i, j, i+1, j, tag));
-                wait_delivery(i+1, j, 120, ok);
-                if (!ok) $display("ERROR: vert up timeout @(%0d,%0d)->(%0d,%0d)", i,j,i+1,j);
-                else     check_zero_hops_and_tag(i+1, j, tag);
+            // POSEDGE: sample acceptances, log arrivals at destination
+            @(posedge clk);
+            phase_cycles = phase_cycles + 1;
+            accept_mask  = 16'h0000;
+
+            // Arrivals: log only when peso is asserted
+            if (get_peso(di, dj)) begin
+            f     = get_pedo(di, dj);
+            src_j = f[SRC_X_HI:SRC_X_LO];
+            src_i = f[SRC_Y_HI:SRC_Y_LO];
+
+            $fdisplay(fh_log,
+                "Phase=%2d, Time=%4d, Destination=(%0d,%0d), Source=(%0d,%0d), Packet Value=%b",
+                k, cyc, di, dj, src_i, src_j, f);
+            recv_cnt = recv_cnt + 1;
             end
-        end
 
-        // 6d) Vertical: “down” (i -> i-1, dy > 0)
-        for (i=1;i<4;i=i+1) begin
-            for (j=0;j<4;j=j+1) begin
-                tag = 32'hB103_0000 | (i*8 + j);
-                inject_local(i, j, mk_xy_flit_xy(i, j, i-1, j, tag));
-                wait_delivery(i-1, j, 120, ok);
-                if (!ok) $display("ERROR: vert down timeout @(%0d,%0d)->(%0d,%0d)", i,j,i-1,j);
-                else     check_zero_hops_and_tag(i-1, j, tag);
+            // Which asserted sources are accepted this cycle? (peri==1 on this posedge)
+            for (id=0; id<16; id=id+1) begin
+            if (pending[id] && asserted[id]) begin
+                si = id_i(id); sj = id_j(id);
+                if (get_peri(si,sj)) accept_mask[id] = 1'b1;
             end
+            end
+
+            // NEGEDGE B: drop pesi for the accepted set; mark them done
+            @(negedge clk);
+            for (id=0; id<16; id=id+1) begin
+            if (accept_mask[id]) begin
+                si = id_i(id); sj = id_j(id);
+                set_pesi(si, sj, 1'b0);
+                asserted[id]    = 1'b0;
+                pending[id]     = 1'b0;
+                accepted_cnt    = accepted_cnt + 1;
+            end
+            end
+        end // while
+
+        if (recv_cnt < 15) begin
+            $display("ERROR: Phase %0d timeout after %0d cycles (%0d/15 arrivals, %0d accepted)",
+                    k, phase_cycles, recv_cnt, accepted_cnt);
         end
 
-        // 7) Contention: RIGHT output of router (1,1)
-        $display(">> Contention test A: (1,1).RIGHT  from (1,0) & (2,1) -> (1,3)");
-        tagaA = 32'hD000_00A1;
-        tagbA = 32'hD000_00A2;
+        end_cyc = cyc;
+        $fdisplay(fh_time, "Phase %0d end_cycle=%0d", k, end_cyc);
+        end // phase loop
 
-        inject_two_same_cycle(
-        1,0, mk_xy_flit_xy(1,0, 1,3, tagaA),
-        2,1, mk_xy_flit_xy(2,1, 1,3, tagbA)
-        );
+        $fdisplay(fh_time, "Gather testbench complete at cycle %0d", cyc);
+        $fclose(fh_time);
+        $fclose(fh_log);
 
-        wait_two_at(1,3, 200, tagaA, tagbA, firstA, fA_first, fA_second);
-        if (firstA == 1) $display("   (A) First delivered: taga=%h then tagb=%h", tagaA, tagbA);
-        else if (firstA == 0) $display("   (A) First delivered: tagb=%h then taga=%h", tagbA, tagaA);
-        else $display("   (A) Unknown order due to timeout");
-
-        // Verify both captured flits (no re-reads!)
-        if (firstA == 1) begin
-            check_flit_word(1,3, fA_first,  tagaA);
-            check_flit_word(1,3, fA_second, tagbA);
-        end else if (firstA == 0) begin
-            check_flit_word(1,3, fA_first,  tagbA);
-            check_flit_word(1,3, fA_second, tagaA);
-        end
-
-        // inject again
-        inject_two_same_cycle(
-        1,0, mk_xy_flit_xy(1,0, 1,3, tagaA),
-        2,1, mk_xy_flit_xy(2,1, 1,3, tagbA)
-        );
-
-        wait_two_at(1,3, 200, tagaA, tagbA, firstA, fA_first, fA_second);
-        if (firstA == 1) $display("   (A) First delivered: taga=%h then tagb=%h", tagaA, tagbA);
-        else if (firstA == 0) $display("   (A) First delivered: tagb=%h then taga=%h", tagbA, tagaA);
-        else $display("   (A) Unknown order due to timeout");
-
-        // Verify both captured flits (no re-reads!)
-        if (firstA == 1) begin
-            check_flit_word(1,3, fA_first,  tagaA);
-            check_flit_word(1,3, fA_second, tagbA);
-        end else if (firstA == 0) begin
-            check_flit_word(1,3, fA_first,  tagbA);
-            check_flit_word(1,3, fA_second, tagaA);
-        end
-
-
-
-        $display("All tests done.");
-        if (error_count == 0) $display("All tests passed.");
-        else $display("%3d failed.", error_count);
-        repeat (20) @(posedge clk); $finish;
+        // Drain and finish
+        repeat (20) @(posedge clk);
+        $finish;
     end
+
+    // always @(posedge clk) begin
+
+    //     // $strobe("[Cyc %2d] router_2_0.ARB_EVEN.req_down: %b", cyc, tb_cardinal_mesh4x4.DUT.router_2_0.ARB_EVEN.req_down);
+    //     // $strobe("[Cyc %2d] router_2_0.ARB_EVEN.gnt_down: %b", cyc, tb_cardinal_mesh4x4.DUT.router_2_0.ARB_EVEN.gnt_down);
+    //    // $strobe("[Cyc %0d] router_2_0.downdo: %64b", cyc, tb_cardinal_mesh4x4.DUT.router_2_0.downdo);
+    // //    $strobe("[Cyc %2d] r2_0 upri=%0b upsi=%0b updi=%64b up_in_valid_even=%0b up_in_ext_even=%1b rightV=%0b EVEN down: req=%05b gnt=%05b emptyE=%0b emptyO=%0b vE=%0b vO=%0b",
+    // //     cyc,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.upri,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.upsi,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.updi,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.UP_INPUT_CTRL.valid_even,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.UP_INPUT_CTRL.ext_even,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.RIGHT_INPUT_CTRL.valid_even,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.ARB_EVEN.req_down,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.ARB_EVEN.gnt_down,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.down_out_empty_even,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.down_out_empty_odd,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.DOWN_OUTPUT_CTRL.output_buffer_valid_even,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.DOWN_OUTPUT_CTRL.output_buffer_valid_odd);
+
+    // // $strobe("[Cyc %2d] r2_0 upri=%0b upsi=%0b updi=%64b up_in_valid_even=%0b data_even=%64b up_in_ext_even=%1b",
+    // //     cyc,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.upri,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.upsi,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.updi,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.UP_INPUT_CTRL.valid_even,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.UP_INPUT_CTRL.data_even,
+    // //     tb_cardinal_mesh4x4.DUT.router_2_0.UP_INPUT_CTRL.ext_even
+
+    // // );
+
+    // end
+
 endmodule
